@@ -109,6 +109,20 @@ const char *NTP_SERVER_3 = "pool.ntp.org";
 constexpr long TIMEZONE_OFFSET_SEC = 9L * 3600L; // JST (+9h)
 constexpr int DAYLIGHT_OFFSET_SEC = 0;
 
+#if PT_ENABLE_DEBUG
+static void logWifiCredentialConstants()
+{
+  DBG_PRINTLN("[DBG] WiFi credential constants:");
+  DBG_PRINT("[DBG] WIFI_SSID_VALUE: '");
+  DBG_PRINT(WIFI_SSID_VALUE);
+  DBG_PRINTLN("'");
+  DBG_PRINTF("[DBG] WIFI_SSID_VALUE length: %u\n", static_cast<unsigned>(strlen(WIFI_SSID_VALUE)));
+  DBG_PRINTF("[DBG] WIFI_PASSWORD_VALUE length: %u\n", static_cast<unsigned>(strlen(WIFI_PASSWORD_VALUE)));
+}
+#else
+static void logWifiCredentialConstants() {}
+#endif
+
 // -----------------------------------------------------------------------------
 // Timing constants
 // -----------------------------------------------------------------------------
@@ -672,6 +686,32 @@ private:
   void initWiFiAndTime()
   {
     DBG_PRINTLN("[BOOT] initWiFiAndTime: WiFi begin");
+    const char *ssid_ptr = WIFI_SSID;
+    const char *pass_ptr = WIFI_PASSWORD;
+    size_t ssid_len = ssid_ptr ? strlen(ssid_ptr) : 0U;
+    size_t pass_len = pass_ptr ? strlen(pass_ptr) : 0U;
+
+    if (!ssid_ptr)
+    {
+      DBG_PRINTLN("[WiFi] ERROR: WIFI_SSID pointer is null");
+    }
+    else
+    {
+      DBG_PRINT("[WiFi] SSID: '");
+      DBG_PRINT(ssid_ptr);
+      DBG_PRINTLN("'");
+    }
+    DBG_PRINTF("[WiFi] SSID length: %u\n", static_cast<unsigned>(ssid_len));
+    DBG_PRINTF("[WiFi] Password length: %u\n", static_cast<unsigned>(pass_len));
+
+    if (ssid_len == 0)
+    {
+      DBG_PRINTLN("[WiFi] ERROR: SSID is empty!");
+    }
+    if (pass_len == 0)
+    {
+      DBG_PRINTLN("[WiFi] ERROR: Password is empty!");
+    }
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     uint32_t start = millis();
@@ -683,6 +723,34 @@ private:
     }
     DBG_PRINTLN("");
     wifi_connected_ = (WiFi.status() == WL_CONNECTED);
+
+    // WiFi接続状況の詳細ログ出力
+    wl_status_t status = WiFi.status();
+    DBG_PRINTF("[WiFi] Status code: %d\n", status);
+    switch (status)
+    {
+    case WL_CONNECTED:
+      DBG_PRINTLN("[WiFi] Status: Connected");
+      DBG_PRINTF("[WiFi] IP: %s\n", WiFi.localIP().toString().c_str());
+      DBG_PRINTF("[WiFi] RSSI: %d dBm\n", WiFi.RSSI());
+      break;
+    case WL_NO_SSID_AVAIL:
+      DBG_PRINTLN("[WiFi] Status: SSID not available");
+      break;
+    case WL_CONNECT_FAILED:
+      DBG_PRINTLN("[WiFi] Status: Connection failed");
+      break;
+    case WL_CONNECTION_LOST:
+      DBG_PRINTLN("[WiFi] Status: Connection lost");
+      break;
+    case WL_DISCONNECTED:
+      DBG_PRINTLN("[WiFi] Status: Disconnected");
+      break;
+    default:
+      DBG_PRINTF("[WiFi] Status: Unknown (%d)\n", status);
+      break;
+    }
+
     DBG_PRINTLN(wifi_connected_ ? "[WiFi] Connected" : "[WiFi] Not connected");
 
     configTime(TIMEZONE_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
@@ -1887,6 +1955,7 @@ void setup()
   // 少し待ってから開始（USBシリアル安定化のため）
   delay(200);
   DBG_PRINTLN("[BOOT] setup()");
+  logWifiCredentialConstants();
   app.begin();
 }
 
