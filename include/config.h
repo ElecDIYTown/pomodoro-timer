@@ -97,8 +97,14 @@ constexpr uint32_t BUTTON_DEBOUNCE_MS = 20;          // 20 msデバウンス
 constexpr uint32_t LONG_PRESS_NEXT_MS = 2000;        // 2 s
 constexpr uint32_t LONG_PRESS_PREV_MS = 4000;        // 4 s
 constexpr uint32_t LONG_PRESS_RESET_MS = 10000;      // 10 s
+constexpr uint32_t LONG_PRESS_WIFI_SYNC_MS = 15000;  // 15 s
 constexpr uint32_t PRE_ALERT_THRESHOLD_MS = 60000;   // 残り1分
 constexpr uint32_t FINAL_COUNTDOWN_WINDOW_MS = 5000; // 最後の5秒
+
+// -----------------------------------------------------------------------------
+// 日付定数
+// -----------------------------------------------------------------------------
+constexpr const char* INVALID_DATE_KEY = "19700101"; // エポックの日付（無効な日付として使用）
 
 // -----------------------------------------------------------------------------
 // サイクル設定

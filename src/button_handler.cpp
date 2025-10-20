@@ -100,7 +100,11 @@ void ButtonHandler::handleRelease(ButtonId button, uint32_t now_ms)
   switch (button)
   {
   case ButtonId::BTN1:
-    if (held_ms >= LONG_PRESS_RESET_MS)
+    if (held_ms >= LONG_PRESS_WIFI_SYNC_MS)
+    {
+      enqueue(ButtonEventType::BTN1_LONG_15S);
+    }
+    else if (held_ms >= LONG_PRESS_RESET_MS)
     {
       enqueue(ButtonEventType::BTN1_LONG_10S);
     }

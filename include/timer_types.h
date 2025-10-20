@@ -77,6 +77,7 @@ struct CheckpointPayload
   uint16_t break_count = 0;
   uint32_t today_focus_ms = 0;
   String current_date_key;
+  String last_sync_date_key;
 };
 
 #endif // TIMER_TYPES_H
