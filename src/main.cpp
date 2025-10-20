@@ -719,7 +719,7 @@ private:
     DBG_PRINTLN("");
     wifi_connected_ = (WiFi.status() == WL_CONNECTED);
 
-    // WiFi接続状況の詳細ログ出力
+  // Detailed Wi-Fi connection status logging
     wl_status_t status = WiFi.status();
     DBG_PRINTF("[WiFi] Status code: %d\n", status);
     switch (status)
@@ -1975,7 +1975,7 @@ static PomodoroTimerApp app;
 void setup()
 {
   DBG_BEGIN(115200);
-  // 少し待ってから開始（USBシリアル安定化のため）
+  // Wait briefly before starting (allows USB serial to stabilize)
   delay(200);
   DBG_PRINTLN("[BOOT] setup()");
   logWifiCredentialConstants();
@@ -1985,7 +1985,7 @@ void setup()
 void loop()
 {
   app.loop();
-  // 2秒ごとにステータスをシリアルに出力
+  // Output status to the serial console every 2 seconds
   static uint32_t last_log = 0;
   uint32_t now = millis();
   if (now - last_log >= 2000)
