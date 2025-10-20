@@ -78,12 +78,8 @@ static const uint16_t COLOR_TEXT_DIM = 0x8410; // approx. 50% gray
 static const uint16_t COLOR_ALERT = ST77XX_RED;
 static const uint16_t COLOR_WORK = ST77XX_BLUE;
 static const uint16_t COLOR_BREAK = ST77XX_GREEN;
-static const uint16_t COLOR_RING_BG = 0x4208;              // dark gray
-static const uint16_t COLOR_BAR_BG = 0x2945;               // muted gray frame
-static const uint16_t COLOR_BAR_FILL_WORK_START = 0xFD20;  // warm orange
-static const uint16_t COLOR_BAR_FILL_WORK_END = 0xF800;    // vivid red
-static const uint16_t COLOR_BAR_FILL_BREAK_START = 0x07E0; // bright green
-static const uint16_t COLOR_BAR_FILL_BREAK_END = 0x0400;   // deep green
+static const uint16_t COLOR_RING_BG = 0x4208; // dark gray
+static const uint16_t COLOR_BAR_BG = 0x2945;  // muted gray frame
 
 // -----------------------------------------------------------------------------
 // Pin configuration (Seeed Studio XIAO ESP32-C3)
@@ -476,8 +472,7 @@ private:
 // -----------------------------------------------------------------------------
 class PomodoroTimerApp;
 static void renderUI(PomodoroTimerApp &app);
-static void drawProgressBar(Adafruit_ST7789 &display, float progress, bool is_work);
-static uint16_t lerpColor565(uint16_t from, uint16_t to, float t);
+static void drawProgressBar(Adafruit_ST7789 &display, float remaining_ratio);
 static void drawWifiIndicator(Adafruit_ST7789 &display, int16_t x, int16_t y, bool connected);
 static void drawCenteredText(Adafruit_ST7789 &display, const char *text, int16_t y, uint8_t size, uint16_t color);
 
@@ -1121,7 +1116,12 @@ private:
   {
     if (direction > 0)
     {
-      current_phase_index_ = (current_phase_index_ + 1) % PHASE_COUNT;
+      if (current_phase_index_ >= PHASE_COUNT - 1)
+      {
+        concludeCycleAndHold();
+        return;
+      }
+      current_phase_index_ += 1;
     }
     else if (direction < 0)
     {
@@ -1148,6 +1148,25 @@ private:
     }
   }
 
+  // Resets the timer state once the configured cycle finishes.
+  void concludeCycleAndHold()
+  {
+    state_ = TimerState::STOPPED;
+    pre_alert_triggered_ = false;
+    final_countdown_last_sec_ = 0;
+    work_cycle_count_ = 0;
+    break_cycle_count_ = 0;
+    current_phase_index_ = 0;
+    remaining_ms_ = PHASES[0].duration_ms;
+    elapsed_ms_in_segment_ = 0;
+    current_segment_.is_work = PHASES[0].is_work;
+    current_segment_.segment_id = 1;
+    current_segment_.session_id = next_session_id_;
+    strncpy(current_segment_.cycle_label, "Work#1", sizeof(current_segment_.cycle_label));
+    current_segment_.cycle_label[sizeof(current_segment_.cycle_label) - 1] = '\0';
+    current_segment_.start_epoch = 0;
+  }
+
   void updateTimer(uint32_t delta_ms)
   {
     if (state_ != TimerState::RUNNING)
@@ -1170,8 +1189,16 @@ private:
 
     if (remaining_ms_ == 0)
     {
+      bool last_phase = (current_phase_index_ == PHASE_COUNT - 1);
       finalizeSegment(SegmentEndReason::COMPLETED);
-      advancePhase(+1, true);
+      if (last_phase)
+      {
+        concludeCycleAndHold();
+      }
+      else
+      {
+        advancePhase(+1, true);
+      }
     }
   }
 
@@ -1629,6 +1656,8 @@ static void renderUI(PomodoroTimerApp &app)
     uint32_t focus_minutes;
     uint8_t volume_level;
     char cycle_label[32];
+    bool clock_valid;
+    char clock_text[6];
   };
 
   static UiCache cache = {};
@@ -1637,6 +1666,8 @@ static void renderUI(PomodoroTimerApp &app)
   if (!cache.initialized)
   {
     cache.cycle_label[0] = '\0';
+    cache.clock_text[0] = '\0';
+    cache.clock_valid = false;
   }
 
   if (!full_redraw && strcmp(app.cycleLabel(), cache.cycle_label) != 0)
@@ -1687,15 +1718,46 @@ static void renderUI(PomodoroTimerApp &app)
     }
   }
 
+  // Header: clock (top-right)
+  char clock_buffer[6] = "--:--";
+  bool clock_available = false;
+  struct tm clock_info;
+  if (getLocalTime(&clock_info, 5))
+  {
+    snprintf(clock_buffer, sizeof(clock_buffer), "%02d:%02d", clock_info.tm_hour, clock_info.tm_min);
+    clock_available = true;
+  }
+
+  bool clock_dirty = full_redraw || (clock_available != cache.clock_valid) ||
+                     (clock_available && strcmp(clock_buffer, cache.clock_text) != 0);
+
+  if (clock_dirty)
+  {
+    const int16_t area_x = 150;
+    const int16_t area_y = 0;
+    const int16_t area_width = 90;
+    const int16_t area_height = 20;
+    tft.fillRect(area_x, area_y, area_width, area_height, COLOR_BACKGROUND);
+    tft.setTextSize(2);
+    tft.setTextColor(clock_available ? COLOR_TEXT_PRIMARY : COLOR_TEXT_DIM);
+    int16_t x1, y1;
+    uint16_t w, h;
+    tft.getTextBounds(clock_buffer, 0, 0, &x1, &y1, &w, &h);
+    int16_t clock_x = area_x + (area_width - static_cast<int16_t>(w)) / 2;
+    int16_t clock_y = area_y + (area_height - static_cast<int16_t>(h)) / 2 - y1;
+    tft.setCursor(clock_x, clock_y);
+    tft.print(clock_buffer);
+  }
+
   // Header: SD availability
   if (full_redraw || app.sdAvailable() != cache.sd_available)
   {
-    tft.fillRect(150, 0, 90, 20, COLOR_BACKGROUND);
+    tft.fillRect(150, 20, 90, 12, COLOR_BACKGROUND);
     if (!app.sdAvailable())
     {
       tft.setTextColor(COLOR_ALERT);
-      tft.setTextSize(2);
-      tft.setCursor(150, 10);
+      tft.setTextSize(1);
+      tft.setCursor(150, 28);
       tft.print("SD!");
     }
   }
@@ -1714,8 +1776,8 @@ static void renderUI(PomodoroTimerApp &app)
 
   if (progress_dirty)
   {
-    float progress = (base == 0) ? 0.0f : (1.0f - (float)remaining / (float)base);
-    drawProgressBar(tft, progress, app.isWorkPhase());
+    float remaining_ratio = (base == 0) ? 0.0f : (static_cast<float>(remaining) / static_cast<float>(base));
+    drawProgressBar(tft, remaining_ratio);
   }
 
   if (progress_dirty)
@@ -1784,34 +1846,18 @@ static void renderUI(PomodoroTimerApp &app)
   cache.remaining_seconds = total_seconds;
   cache.focus_minutes = focus_minutes;
   cache.volume_level = app.volumeLevel();
+  cache.clock_valid = clock_available;
+  if (clock_available)
+  {
+    strncpy(cache.clock_text, clock_buffer, sizeof(cache.clock_text) - 1);
+    cache.clock_text[sizeof(cache.clock_text) - 1] = '\0';
+  }
+  else
+  {
+    cache.clock_text[0] = '\0';
+  }
   strncpy(cache.cycle_label, app.cycleLabel(), sizeof(cache.cycle_label) - 1);
   cache.cycle_label[sizeof(cache.cycle_label) - 1] = '\0';
-}
-
-static uint16_t lerpColor565(uint16_t from, uint16_t to, float t)
-{
-  if (t < 0.0f)
-  {
-    t = 0.0f;
-  }
-  else if (t > 1.0f)
-  {
-    t = 1.0f;
-  }
-
-  uint8_t fr = (from >> 11) & 0x1F;
-  uint8_t fg = (from >> 5) & 0x3F;
-  uint8_t fb = from & 0x1F;
-
-  uint8_t tr = (to >> 11) & 0x1F;
-  uint8_t tg = (to >> 5) & 0x3F;
-  uint8_t tb = to & 0x1F;
-
-  uint8_t rr = fr + static_cast<uint8_t>((tr - fr) * t + 0.5f);
-  uint8_t rg = fg + static_cast<uint8_t>((tg - fg) * t + 0.5f);
-  uint8_t rb = fb + static_cast<uint8_t>((tb - fb) * t + 0.5f);
-
-  return static_cast<uint16_t>((rr << 11) | (rg << 5) | rb);
 }
 
 static void drawWifiIndicator(Adafruit_ST7789 &display, int16_t x, int16_t y, bool connected)
@@ -1865,7 +1911,7 @@ static void drawWifiIndicator(Adafruit_ST7789 &display, int16_t x, int16_t y, bo
   }
 }
 
-static void drawProgressBar(Adafruit_ST7789 &display, float progress, bool is_work)
+static void drawProgressBar(Adafruit_ST7789 &display, float remaining_ratio)
 {
   const int16_t bar_x = 20;
   const int16_t bar_y = 90;
@@ -1877,9 +1923,9 @@ static void drawProgressBar(Adafruit_ST7789 &display, float progress, bool is_wo
   const int16_t inner_height = bar_height - 4;
 
   display.fillRoundRect(bar_x, bar_y, bar_width, bar_height, 8, COLOR_BAR_BG);
-  display.fillRoundRect(inner_x, inner_y, inner_width, inner_height, 6, COLOR_RING_BG);
+  display.fillRoundRect(inner_x, inner_y, inner_width, inner_height, 6, COLOR_BACKGROUND);
 
-  float clamped = progress;
+  float clamped = remaining_ratio;
   if (clamped < 0.0f)
   {
     clamped = 0.0f;
@@ -1892,30 +1938,7 @@ static void drawProgressBar(Adafruit_ST7789 &display, float progress, bool is_wo
   int16_t fill_width = static_cast<int16_t>(inner_width * clamped + 0.5f);
   if (fill_width > 0)
   {
-    uint16_t start_color = is_work ? COLOR_BAR_FILL_WORK_START : COLOR_BAR_FILL_BREAK_START;
-    uint16_t end_color = is_work ? COLOR_BAR_FILL_WORK_END : COLOR_BAR_FILL_BREAK_END;
-
-    if (fill_width <= 4)
-    {
-      uint16_t color = lerpColor565(start_color, end_color, clamped);
-      display.fillRect(inner_x, inner_y, fill_width, inner_height, color);
-    }
-    else
-    {
-      const int segments = 24;
-      for (int i = 0; i < segments; ++i)
-      {
-        int16_t seg_start = inner_x + (static_cast<int32_t>(fill_width) * i) / segments;
-        int16_t seg_end = inner_x + (static_cast<int32_t>(fill_width) * (i + 1)) / segments;
-        if (seg_end <= seg_start)
-        {
-          continue;
-        }
-        float t = (i + 0.5f) / segments;
-        uint16_t color = lerpColor565(start_color, end_color, t);
-        display.fillRect(seg_start, inner_y, seg_end - seg_start, inner_height, color);
-      }
-    }
+    display.fillRect(inner_x, inner_y, fill_width, inner_height, COLOR_TEXT_PRIMARY);
   }
 
   uint16_t percent = static_cast<uint16_t>(clamped * 100.0f + 0.5f);
