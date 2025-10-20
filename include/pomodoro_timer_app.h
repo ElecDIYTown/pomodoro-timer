@@ -58,6 +58,7 @@ private:
   void initDisplay();
   void initStorage();
   void initWiFiAndTime();
+  void reconnectWiFiAndSyncTime();
   bool waitForTimeSync(struct tm &info);
   void loadCheckpointOrReset();
   void restoreFromCheckpoint(const CheckpointPayload &payload);
@@ -70,6 +71,7 @@ private:
   void handleSkip();
   void handlePrev();
   void handleFactoryReset();
+  void handleWiFiSync();
   void adjustRemainingMinutes(int8_t delta_minutes);
   void adjustVolume(int8_t delta);
 
@@ -134,6 +136,7 @@ private:
   bool time_synced_ = false;
   time_t last_sync_epoch_ = 0;
   uint32_t last_ntp_sync_ms_ = 0;
+  char last_sync_date_key_[9] = "19700101";
   bool sd_available_ = false;
   bool littlefs_available_ = false;
 

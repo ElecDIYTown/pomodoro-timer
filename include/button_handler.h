@@ -30,6 +30,7 @@ enum class ButtonEventType : uint8_t
   BTN1_LONG_2S,
   BTN1_LONG_4S,
   BTN1_LONG_10S,
+  BTN1_LONG_15S,
   BTN2_SINGLE,
   BTN2_DOUBLE,
   BTN3_SINGLE,

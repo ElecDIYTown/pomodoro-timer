@@ -149,6 +149,24 @@ void PomodoroTimerApp::initWiFiAndTime()
   {
     DBG_PRINTLN("[WiFi] ERROR: Password is empty!");
   }
+
+  // Check if WiFi sync was already done today
+  char today_key[9] = {0};
+  buildCurrentDateKey(today_key, sizeof(today_key));
+  
+  if (strcmp(today_key, last_sync_date_key_) == 0 && strcmp(today_key, "19700101") != 0)
+  {
+    DBG_PRINTLN("[WiFi] Skipping sync - already synced today");
+    wifi_connected_ = false;
+    time_synced_ = (last_sync_epoch_ > 0);
+    
+    // Configure time even if not syncing
+    configTime(TIMEZONE_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
+    setenv("TZ", "JST-9", 1);
+    tzset();
+    return;
+  }
+
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   uint32_t start = millis();
@@ -202,6 +220,8 @@ void PomodoroTimerApp::initWiFiAndTime()
       time_synced_ = true;
       last_sync_epoch_ = time(nullptr);
       last_ntp_sync_ms_ = millis();
+      strncpy(last_sync_date_key_, today_key, sizeof(last_sync_date_key_));
+      last_sync_date_key_[sizeof(last_sync_date_key_) - 1] = '\0';
       DBG_PRINTLN("[TIME] NTP sync OK");
       uint8_t previous_volume = buzzer_.volumeLevel();
       buzzer_.setVolumeLevel(1);
@@ -233,6 +253,71 @@ bool PomodoroTimerApp::waitForTimeSync(struct tm &info)
     delay(50);
   }
   return false;
+}
+
+void PomodoroTimerApp::reconnectWiFiAndSyncTime()
+{
+  DBG_PRINTLN("[WiFi] Manual reconnect and sync requested");
+  
+  // Disconnect WiFi if connected
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    WiFi.disconnect();
+    delay(100);
+  }
+  
+  // Connect to WiFi
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  uint32_t start = millis();
+  wifi_connected_ = false;
+  while (WiFi.status() != WL_CONNECTED && (millis() - start) < 15000)
+  {
+    delay(250);
+    DBG_PRINT(".");
+  }
+  DBG_PRINTLN("");
+  wifi_connected_ = (WiFi.status() == WL_CONNECTED);
+
+  DBG_PRINTLN(wifi_connected_ ? "[WiFi] Reconnected" : "[WiFi] Reconnect failed");
+
+  if (wifi_connected_)
+  {
+    // Reconfigure time
+    configTime(TIMEZONE_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
+    setenv("TZ", "JST-9", 1);
+    tzset();
+    
+    struct tm timeinfo;
+    if (waitForTimeSync(timeinfo))
+    {
+      time_synced_ = true;
+      last_sync_epoch_ = time(nullptr);
+      last_ntp_sync_ms_ = millis();
+      
+      // Update last sync date key
+      char today_key[9] = {0};
+      buildCurrentDateKey(today_key, sizeof(today_key));
+      strncpy(last_sync_date_key_, today_key, sizeof(last_sync_date_key_));
+      last_sync_date_key_[sizeof(last_sync_date_key_) - 1] = '\0';
+      
+      DBG_PRINTLN("[TIME] Manual NTP sync OK");
+      uint8_t previous_volume = buzzer_.volumeLevel();
+      buzzer_.setVolumeLevel(1);
+      beepOk(3);
+      buzzer_.setVolumeLevel(previous_volume);
+    }
+    else
+    {
+      DBG_PRINTLN("[TIME] Manual NTP sync FAIL");
+      beepError(2, 1);
+    }
+  }
+  else
+  {
+    time_synced_ = false;
+    beepError(3, 1);
+  }
 }
 
 void PomodoroTimerApp::loadCheckpointOrReset()
@@ -282,6 +367,7 @@ void PomodoroTimerApp::loadCheckpointOrReset()
   payload.break_count = doc["break_count"] | 0;
   payload.today_focus_ms = doc["today_focus_ms"] | 0;
   payload.current_date_key = (const char *)(doc["current_date_key"] | "");
+  payload.last_sync_date_key = (const char *)(doc["last_sync_date_key"] | "");
 
   restoreFromCheckpoint(payload);
 }
@@ -304,6 +390,8 @@ void PomodoroTimerApp::restoreFromCheckpoint(const CheckpointPayload &payload)
   strncpy(current_date_key_, payload.current_date_key.c_str(), sizeof(current_date_key_));
   current_date_key_[sizeof(current_date_key_) - 1] = '\0';
   last_sync_epoch_ = payload.last_sync_epoch;
+  strncpy(last_sync_date_key_, payload.last_sync_date_key.c_str(), sizeof(last_sync_date_key_));
+  last_sync_date_key_[sizeof(last_sync_date_key_) - 1] = '\0';
   next_session_id_ = current_segment_.session_id + 1;
   pre_alert_triggered_ = (remaining_ms_ <= PRE_ALERT_THRESHOLD_MS && remaining_ms_ > 0);
   final_countdown_last_sec_ = 0;
@@ -398,6 +486,9 @@ void PomodoroTimerApp::processButtonEvents()
     case ButtonEventType::BTN1_LONG_10S:
       handleFactoryReset();
       break;
+    case ButtonEventType::BTN1_LONG_15S:
+      handleWiFiSync();
+      break;
     case ButtonEventType::BTN2_SINGLE:
       adjustRemainingMinutes(-1);
       break;
@@ -490,6 +581,12 @@ void PomodoroTimerApp::handleFactoryReset()
   checkpoint_next_due_ms_ = now_ms + CHECKPOINT_INTERVAL_MS;
 
   beepOk(2);
+}
+
+void PomodoroTimerApp::handleWiFiSync()
+{
+  DBG_PRINTLN("[BTN] WiFi sync requested");
+  reconnectWiFiAndSyncTime();
 }
 
 void PomodoroTimerApp::adjustRemainingMinutes(int8_t delta_minutes)
@@ -870,6 +967,7 @@ void PomodoroTimerApp::maybeSaveCheckpoint(uint32_t now_ms)
   payload.break_count = break_cycle_count_;
   payload.today_focus_ms = today_focus_ms_;
   payload.current_date_key = current_date_key_;
+  payload.last_sync_date_key = last_sync_date_key_;
 
   File file = LittleFS.open("/system/checkpoint.json", "w");
   if (!file)
@@ -895,6 +993,7 @@ void PomodoroTimerApp::maybeSaveCheckpoint(uint32_t now_ms)
   doc["break_count"] = payload.break_count;
   doc["today_focus_ms"] = payload.today_focus_ms;
   doc["current_date_key"] = payload.current_date_key;
+  doc["last_sync_date_key"] = payload.last_sync_date_key;
 
   serializeJson(doc, file);
   file.close();
