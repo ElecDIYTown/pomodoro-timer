@@ -63,15 +63,15 @@ PomodoroTimerApp
 | ファイル | 行数 | 役割 |
 |---------|-----|------|
 | **元のmain.cpp** | 2004 | すべて |
-| **新main.cpp** | 55 | エントリーポイント |
-| pomodoro_timer_app.cpp | 1016 | メインロジック |
-| ui_renderer.cpp | 333 | UI描画 |
-| button_handler.cpp | 213 | ボタン処理 |
-| buzzer_controller.cpp | 58 | ブザー制御 |
-| config.cpp | 28 | 設定実装 |
-| **合計 (実装)** | 1703 | |
+| **新main.cpp** | 56 | エントリーポイント |
+| pomodoro_timer_app.cpp | 1017 | メインロジック |
+| ui_renderer.cpp | 334 | UI描画 |
+| button_handler.cpp | 214 | ボタン処理 |
+| buzzer_controller.cpp | 59 | ブザー制御 |
+| config.cpp | 29 | 設定実装 |
+| **合計 (実装)** | 1709 | |
 | **ヘッダー** | 531 | |
-| **総計** | 2234 | |
+| **総計** | 2240 | |
 
 ## 保守性の向上ポイント
 
