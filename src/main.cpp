@@ -1,17 +1,17 @@
 /*
- * ESP32-C3 Pomodoro Timer v0
- * Spec reference: pomodoro_timer_spec_v0.md / pomodoro_timer_clarifications_v0.md
- * Board: Seeed XIAO ESP32-C3
+ * ESP32-C3 ポモドーロタイマー v0
+ * 仕様書参照: pomodoro_timer_spec_v0.md / pomodoro_timer_clarifications_v0.md
+ * ボード: Seeed XIAO ESP32-C3
  *
- * Required Arduino libraries:
- *   - WiFi (bundled with ESP32 core)
- *   - SPI (bundled)
- *   - FS / LittleFS (bundled with ESP32 core)
- *   - SD (bundled with ESP32 core)
- *   - time (bundled)
+ * 必要なArduinoライブラリ:
+ *   - WiFi (ESP32コアにバンドル)
+ *   - SPI (バンドル)
+ *   - FS / LittleFS (ESP32コアにバンドル)
+ *   - SD (ESP32コアにバンドル)
+ *   - time (バンドル)
  *   - Adafruit_GFX by Adafruit
  *   - Adafruit_ST7789 by Adafruit
- *   - ArduinoJson by Benoit Blanchon (for checkpoint persistence)
+ *   - ArduinoJson by Benoit Blanchon (チェックポイント永続化用)
  */
 
 #include <Arduino.h>
@@ -36,7 +36,7 @@
 #endif
 
 // -----------------------------------------------------------------------------
-// Credential overrides (loaded from include/secrets.h when present)
+// 認証情報オーバーライド (include/secrets.hが存在する場合に読み込まれる)
 // -----------------------------------------------------------------------------
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -51,7 +51,7 @@
 #endif
 
 // -----------------------------------------------------------------------------
-// Debug helpers
+// デバッグヘルパー
 // -----------------------------------------------------------------------------
 #ifndef PT_ENABLE_DEBUG
 #define PT_ENABLE_DEBUG 1
@@ -70,32 +70,32 @@
 #endif
 
 // -----------------------------------------------------------------------------
-// Rendering colors (shared between boot splash and main UI)
+// レンダリング色 (起動スプラッシュとメインUIで共有)
 // -----------------------------------------------------------------------------
 static const uint16_t COLOR_BACKGROUND = ST77XX_BLACK;
 static const uint16_t COLOR_TEXT_PRIMARY = ST77XX_WHITE;
-static const uint16_t COLOR_TEXT_DIM = 0x8410; // approx. 50% gray
+static const uint16_t COLOR_TEXT_DIM = 0x8410; // 約50%グレー
 static const uint16_t COLOR_ALERT = ST77XX_RED;
 static const uint16_t COLOR_WORK = ST77XX_BLUE;
 static const uint16_t COLOR_BREAK = ST77XX_GREEN;
-static const uint16_t COLOR_RING_BG = 0x4208; // dark gray
-static const uint16_t COLOR_BAR_BG = 0x2945;  // muted gray frame
+static const uint16_t COLOR_RING_BG = 0x4208; // ダークグレー
+static const uint16_t COLOR_BAR_BG = 0x2945;  // ミュートグレーフレーム
 
 // -----------------------------------------------------------------------------
-// Pin configuration (Seeed Studio XIAO ESP32-C3)
+// ピン設定 (Seeed Studio XIAO ESP32-C3)
 // -----------------------------------------------------------------------------
 constexpr int PIN_SPI_SCK = D8;       // GPIO8
 constexpr int PIN_SPI_MOSI = D10;     // GPIO10
 constexpr int PIN_SPI_MISO = D9;      // GPIO9
 constexpr int PIN_TFT_CS = D6;        // GPIO21
 constexpr int PIN_TFT_DC = D2;        // GPIO4
-constexpr int PIN_TFT_RST = -1;       // Software reset
+constexpr int PIN_TFT_RST = -1;       // ソフトウェアリセット
 constexpr int PIN_SD_CS = D7;         // GPIO20
 constexpr int PIN_BUTTON_LADDER = D0; // GPIO2 (ADC)
 constexpr int PIN_BUZZER = D1;        // GPIO3 (PWM / LEDC)
 
 // -----------------------------------------------------------------------------
-// Wi-Fi / NTP configuration
+// Wi-Fi / NTP 設定
 // -----------------------------------------------------------------------------
 const char *WIFI_SSID = WIFI_SSID_VALUE;
 const char *WIFI_PASSWORD = WIFI_PASSWORD_VALUE;
@@ -120,21 +120,21 @@ static void logWifiCredentialConstants() {}
 #endif
 
 // -----------------------------------------------------------------------------
-// Timing constants
+// タイミング定数
 // -----------------------------------------------------------------------------
-constexpr uint32_t TICK_INTERVAL_MS = 10;            // 10 ms tick
-constexpr uint32_t UI_UPDATE_INTERVAL_MS = 250;      // 250 ms UI refresh
-constexpr uint32_t CHECKPOINT_INTERVAL_MS = 60000;   // 60 s checkpoint save
-constexpr uint32_t DOUBLE_TAP_WINDOW_MS = 300;       // 300 ms double tap window
-constexpr uint32_t BUTTON_DEBOUNCE_MS = 20;          // 20 ms debounce
+constexpr uint32_t TICK_INTERVAL_MS = 10;            // 10 msティック
+constexpr uint32_t UI_UPDATE_INTERVAL_MS = 250;      // 250 ms UI更新
+constexpr uint32_t CHECKPOINT_INTERVAL_MS = 60000;   // 60 sチェックポイント保存
+constexpr uint32_t DOUBLE_TAP_WINDOW_MS = 300;       // 300 msダブルタップウィンドウ
+constexpr uint32_t BUTTON_DEBOUNCE_MS = 20;          // 20 msデバウンス
 constexpr uint32_t LONG_PRESS_NEXT_MS = 2000;        // 2 s
 constexpr uint32_t LONG_PRESS_PREV_MS = 4000;        // 4 s
 constexpr uint32_t LONG_PRESS_RESET_MS = 10000;      // 10 s
-constexpr uint32_t PRE_ALERT_THRESHOLD_MS = 60000;   // 1 minute remaining
-constexpr uint32_t FINAL_COUNTDOWN_WINDOW_MS = 5000; // last 5 seconds
+constexpr uint32_t PRE_ALERT_THRESHOLD_MS = 60000;   // 残り1分
+constexpr uint32_t FINAL_COUNTDOWN_WINDOW_MS = 5000; // 最後の5秒
 
 // -----------------------------------------------------------------------------
-// Cycle configuration
+// サイクル設定
 // -----------------------------------------------------------------------------
 struct PhaseConfig
 {
@@ -143,15 +143,15 @@ struct PhaseConfig
 };
 
 constexpr PhaseConfig PHASES[] = {
-    {50UL * 60UL * 1000UL, true},  // Work 50 min
-    {5UL * 60UL * 1000UL, false},  // Break 5 min
-    {50UL * 60UL * 1000UL, true},  // Work 50 min
-    {10UL * 60UL * 1000UL, false}, // Break 10 min
+    {50UL * 60UL * 1000UL, true},  // 作業 50分
+    {5UL * 60UL * 1000UL, false},  // 休憩 5分
+    {50UL * 60UL * 1000UL, true},  // 作業 50分
+    {10UL * 60UL * 1000UL, false}, // 休憩 10分
 };
 constexpr size_t PHASE_COUNT = sizeof(PHASES) / sizeof(PHASES[0]);
 
 // -----------------------------------------------------------------------------
-// Button handling
+// ボタン処理
 // -----------------------------------------------------------------------------
 enum class ButtonId : uint8_t
 {
@@ -179,11 +179,11 @@ struct ButtonEvent
   ButtonEventType type = ButtonEventType::NONE;
 };
 
-// Ladder resistors: 100kΩ pull-up, buttons with 10kΩ / 47kΩ / 68kΩ to GND.
-// Adjust these midpoints as needed after on-device calibration.
-constexpr uint16_t ADC_THRESHOLD_BTN1_BTN2 = 840;  // midpoint between 10kΩ and 47kΩ
-constexpr uint16_t ADC_THRESHOLD_BTN2_BTN3 = 1480; // midpoint between 47kΩ and 68kΩ
-constexpr uint16_t ADC_THRESHOLD_BTN3_IDLE = 2850; // midpoint between 68kΩ and open
+// ラダー抵抗: 100kΩプルアップ、ボタンは10kΩ / 47kΩ / 68kΩでGNDへ。
+// デバイスでの校正後、必要に応じてこれらの中間点を調整する。
+constexpr uint16_t ADC_THRESHOLD_BTN1_BTN2 = 840;  // 10kΩと47kΩの中間点
+constexpr uint16_t ADC_THRESHOLD_BTN2_BTN3 = 1480; // 47kΩと68kΩの中間点
+constexpr uint16_t ADC_THRESHOLD_BTN3_IDLE = 2850; // 68kΩとオープンの中間点
 
 struct PendingSingle
 {
@@ -191,7 +191,7 @@ struct PendingSingle
   uint32_t timestamp_ms = 0;
 };
 
-class PomodoroTimerApp; // forward declaration for callbacks
+class PomodoroTimerApp; // コールバックのための前方宣言
 
 class ButtonHandler
 {
@@ -275,14 +275,14 @@ private:
   {
     if (previous == ButtonId::NONE && current != ButtonId::NONE)
     {
-      // button pressed
+      // ボタン押下
       active_button_ = current;
       press_start_ms_ = now_ms;
       last_long_press_tick_ms_ = now_ms;
     }
     else if (previous != ButtonId::NONE && current == ButtonId::NONE)
     {
-      // button released
+      // ボタン解放
       handleRelease(previous, now_ms);
       active_button_ = ButtonId::NONE;
       last_long_press_tick_ms_ = 0;
@@ -328,7 +328,7 @@ private:
     PendingSingle &slot = (button == ButtonId::BTN2) ? pending_btn2_ : pending_btn3_;
     if (slot.active && (now_ms - slot.timestamp_ms) <= DOUBLE_TAP_WINDOW_MS)
     {
-      // double tap
+      // ダブルタップ
       slot.active = false;
       enqueue(button == ButtonId::BTN2 ? ButtonEventType::BTN2_DOUBLE : ButtonEventType::BTN3_DOUBLE);
     }
@@ -336,7 +336,7 @@ private:
     {
       slot.active = true;
       slot.timestamp_ms = now_ms;
-      // real single will be emitted after window passes
+      // ウィンドウ経過後に実際のシングルタップが発行される
     }
   }
 
@@ -367,7 +367,7 @@ private:
     }
     if (queue_count_ >= QUEUE_CAPACITY)
     {
-      // drop oldest to keep newest interaction responsive
+      // 最新の操作を応答性良く保つため、最も古いものをドロップ
       queue_head_ = (queue_head_ + 1) % QUEUE_CAPACITY;
       queue_count_--;
     }
@@ -396,7 +396,7 @@ private:
 };
 
 // -----------------------------------------------------------------------------
-// Audio (buzzer) control
+// オーディオ (ブザー) 制御
 // -----------------------------------------------------------------------------
 class BuzzerController
 {
@@ -407,7 +407,7 @@ public:
     // Arduino-ESP32 v3.x API
     ledcAttach(PIN_BUZZER, base_frequency_, resolution_bits_);
 #else
-    // Legacy API (v2.x)
+    // レガシーAPI (v2.x)
     ledcSetup(channel_, base_frequency_, resolution_bits_);
     ledcAttachPin(PIN_BUZZER, channel_);
 #endif
@@ -468,7 +468,7 @@ private:
 };
 
 // -----------------------------------------------------------------------------
-// Forward declarations
+// 前方宣言
 // -----------------------------------------------------------------------------
 class PomodoroTimerApp;
 static void renderUI(PomodoroTimerApp &app);
@@ -477,7 +477,7 @@ static void drawWifiIndicator(Adafruit_ST7789 &display, int16_t x, int16_t y, bo
 static void drawCenteredText(Adafruit_ST7789 &display, const char *text, int16_t y, uint8_t size, uint16_t color);
 
 // -----------------------------------------------------------------------------
-// Pomodoro timer core
+// ポモドーロタイマーコア
 // -----------------------------------------------------------------------------
 enum class TimerState : uint8_t
 {
@@ -592,7 +592,7 @@ public:
   }
 
   // ---------------------------------------------------------------------------
-  // Accessors for UI / status
+  // UI / ステータス用のアクセサ
   // ---------------------------------------------------------------------------
   Adafruit_ST7789 &display() { return tft_; }
   TimerState state() const { return state_; }
@@ -629,17 +629,17 @@ public:
 
 private:
   // ---------------------------------------------------------------------------
-  // Initialization helpers
+  // 初期化ヘルパー
   // ---------------------------------------------------------------------------
   void initDisplay()
   {
     DBG_PRINTLN("[BOOT] initDisplay: ST7789 init start");
     tft_ = Adafruit_ST7789(&SPI, PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
     tft_.init(240, 240);
-    tft_.setRotation(2); // USB connector on bottom
+    tft_.setRotation(2); // USBコネクタが下
     tft_.fillScreen(ST77XX_BLACK);
     tft_.setTextWrap(false);
-    // simple border for visual check
+    // 視覚的チェック用のシンプルなボーダー
     tft_.fillRect(0, 0, 240, 6, ST77XX_BLUE);
     tft_.fillRect(0, 234, 240, 6, ST77XX_GREEN);
     DBG_PRINTLN("[BOOT] initDisplay: OK");
@@ -719,7 +719,7 @@ private:
     DBG_PRINTLN("");
     wifi_connected_ = (WiFi.status() == WL_CONNECTED);
 
-    // WiFi接続状況の詳細ログ出力
+    // WiFi接続ステータスの詳細ログ出力
     wl_status_t status = WiFi.status();
     DBG_PRINTF("[WiFi] Status code: %d\n", status);
     switch (status)
@@ -873,10 +873,10 @@ private:
 
     if (payload.current_state == "running")
     {
-      // Treat as recovered drop
+      // 回復されたドロップとして扱う
       logRecoveredDrop(payload);
       state_ = TimerState::PAUSED;
-      // increment segment id for resume
+      // 再開のためにセグメントIDをインクリメント
       current_segment_.segment_id += 1;
       elapsed_ms_in_segment_ = 0;
     }
@@ -935,7 +935,7 @@ private:
   }
 
   // ---------------------------------------------------------------------------
-  // Button handling
+  // ボタン処理
   // ---------------------------------------------------------------------------
   void processButtonEvents()
   {
@@ -983,7 +983,7 @@ private:
     }
     else if (state_ == TimerState::RUNNING)
     {
-      // pause
+      // 一時停止
       state_ = TimerState::PAUSED;
       finalizeSegment(SegmentEndReason::PAUSED);
     }
@@ -1073,7 +1073,7 @@ private:
   }
 
   // ---------------------------------------------------------------------------
-  // Phase / segment control
+  // フェーズ / セグメント制御
   // ---------------------------------------------------------------------------
   void beginPhase(uint8_t phase_index)
   {
@@ -1084,7 +1084,7 @@ private:
     {
       work_cycle_count_ += 1;
       snprintf(current_segment_.cycle_label, sizeof(current_segment_.cycle_label), "Work#%u", work_cycle_count_);
-      // new work session => increment session id and reset segment id
+      // 新しい作業セッション => セッションIDをインクリメントし、セグメントIDをリセット
       incrementSessionId();
       current_segment_.segment_id = 1;
     }
@@ -1148,7 +1148,7 @@ private:
     }
   }
 
-  // Resets the timer state once the configured cycle finishes.
+  // 設定されたサイクルが終了したらタイマーの状態をリセットする
   void concludeCycleAndHold()
   {
     state_ = TimerState::STOPPED;
@@ -1234,11 +1234,11 @@ private:
 
     if (reason == SegmentEndReason::PAUSED)
     {
-      // do not change state (already paused)
+      // 状態を変更しない (既に一時停止中)
     }
     else
     {
-      // stop running state (will be set by caller)
+      // 実行中の状態を停止 (呼び出し元によって設定される)
       state_ = TimerState::PAUSED;
     }
 
@@ -1265,7 +1265,7 @@ private:
     time_t now_epoch = time(nullptr);
     if (now_epoch < 100000)
     {
-      // fallback to last sync epoch or zero
+      // 最後の同期エポックまたはゼロにフォールバック
       if (last_sync_epoch_ > 0)
       {
         now_epoch = last_sync_epoch_ + ((millis() - last_ntp_sync_ms_) / 1000);
@@ -1293,7 +1293,7 @@ private:
 
   void incrementSessionId()
   {
-    // Reset session counter when date changes
+    // 日付が変わったときにセッションカウンターをリセット
     ensureDateKeyFresh();
     current_segment_.session_id = next_session_id_;
     next_session_id_ += 1;
@@ -1346,7 +1346,7 @@ private:
       return;
     }
 
-    // Day changed -> finalize current segment at midnight
+    // 日付変更 -> 現在のセグメントを午前0時に終了
     time_t now_epoch = time(nullptr);
     struct tm info;
     if (!getLocalTime(&info, 50))
@@ -1355,7 +1355,7 @@ private:
       return;
     }
 
-    // compute midnight epoch of new day
+    // 新しい日の午前0時のエポックを計算
     struct tm midnight_info = info;
     midnight_info.tm_hour = 0;
     midnight_info.tm_min = 0;
@@ -1385,14 +1385,14 @@ private:
                      current_segment_.cycle_label);
     }
 
-    // prepare new day session
+    // 新しい日のセッションを準備
     strncpy(current_date_key_, today_key, sizeof(current_date_key_));
     next_session_id_ = 1;
     today_focus_ms_ = 0;
     current_segment_.session_id = next_session_id_++;
     current_segment_.segment_id = 1;
     current_segment_.start_epoch = midnight_epoch;
-    // remaining_ms_ already reflects leftover (since part consumed)
+    // remaining_ms_ は既に残りを反映している (一部が消費されているため)
     elapsed_ms_in_segment_ = 0;
     pre_alert_triggered_ = (remaining_ms_ <= PRE_ALERT_THRESHOLD_MS);
     final_countdown_last_sec_ = 0;
@@ -1459,7 +1459,7 @@ private:
   }
 
   // ----------------------------
-  // Diagnostics helpers
+  // 診断ヘルパー
   // ----------------------------
   void splash(const char *l1, const char *l2, uint16_t color)
   {
@@ -1574,7 +1574,7 @@ private:
   }
 
   // ---------------------------------------------------------------------------
-  // Members
+  // メンバー変数
   // ---------------------------------------------------------------------------
   ButtonHandler button_handler_;
   BuzzerController buzzer_;
@@ -1687,7 +1687,7 @@ static void renderUI(PomodoroTimerApp &app)
     tft.drawFastHLine(0, 188, 240, COLOR_RING_BG);
   }
 
-  // Header: cycle label
+  // ヘッダー: サイクルラベル
   if (full_redraw || strcmp(app.cycleLabel(), cache.cycle_label) != 0)
   {
     tft.fillRect(0, 0, 240, 30, COLOR_BACKGROUND);
@@ -1697,7 +1697,7 @@ static void renderUI(PomodoroTimerApp &app)
     tft.print(app.cycleLabel());
   }
 
-  // Header: timer state
+  // ヘッダー: タイマーの状態
   if (full_redraw || app.state() != cache.state)
   {
     tft.fillRect(0, 30, 140, 30, COLOR_BACKGROUND);
@@ -1718,7 +1718,7 @@ static void renderUI(PomodoroTimerApp &app)
     }
   }
 
-  // Header: clock (top-right)
+  // ヘッダー: 時計 (右上)
   char clock_buffer[6] = "--:--";
   bool clock_available = false;
   struct tm clock_info;
@@ -1749,7 +1749,7 @@ static void renderUI(PomodoroTimerApp &app)
     tft.print(clock_buffer);
   }
 
-  // Header: SD availability
+  // ヘッダー: SD利用可否
   if (full_redraw || app.sdAvailable() != cache.sd_available)
   {
     tft.fillRect(150, 20, 90, 12, COLOR_BACKGROUND);
@@ -1762,13 +1762,13 @@ static void renderUI(PomodoroTimerApp &app)
     }
   }
 
-  // Header: Wi-Fi status
+  // ヘッダー: Wi-Fiステータス
   if (full_redraw || app.wifiConnected() != cache.wifi_connected)
   {
     drawWifiIndicator(tft, 150, 30, app.wifiConnected());
   }
 
-  // Progress bar and remaining time
+  // プログレスバーと残り時間
   uint32_t base = app.basePhaseDurationMs();
   uint32_t remaining = app.remainingMs();
   uint32_t total_seconds = (remaining + 999) / 1000;
@@ -1870,7 +1870,7 @@ static void drawWifiIndicator(Adafruit_ST7789 &display, int16_t x, int16_t y, bo
   int16_t base_x = x + 6;
   int16_t base_y = y + height - 5;
 
-  // Draw three signal bars; fill when connected, outline when offline for quick glance.
+  // 3本のシグナルバーを描画; 接続時は塗りつぶし、オフライン時はアウトラインで一目で分かるようにする
   for (int i = 0; i < 3; ++i)
   {
     int16_t bar_height = (i + 1) * 4;
@@ -1968,14 +1968,14 @@ static void drawCenteredText(Adafruit_ST7789 &display, const char *text, int16_t
 }
 
 // -----------------------------------------------------------------------------
-// Global app instance
+// グローバルアプリインスタンス
 // -----------------------------------------------------------------------------
 static PomodoroTimerApp app;
 
 void setup()
 {
   DBG_BEGIN(115200);
-  // 少し待ってから開始（USBシリアル安定化のため）
+  // USBシリアル安定化のため少し待機
   delay(200);
   DBG_PRINTLN("[BOOT] setup()");
   logWifiCredentialConstants();
@@ -1985,7 +1985,7 @@ void setup()
 void loop()
 {
   app.loop();
-  // 2秒ごとにステータスをシリアルに出力
+  // 2秒ごとにステータスログをシリアル出力
   static uint32_t last_log = 0;
   uint32_t now = millis();
   if (now - last_log >= 2000)
