@@ -154,11 +154,12 @@ void PomodoroTimerApp::initWiFiAndTime()
   char today_key[9] = {0};
   buildCurrentDateKey(today_key, sizeof(today_key));
   
-  if (strcmp(today_key, last_sync_date_key_) == 0 && strcmp(today_key, "19700101") != 0)
+  if (strcmp(today_key, last_sync_date_key_) == 0 && strcmp(today_key, INVALID_DATE_KEY) != 0)
   {
     DBG_PRINTLN("[WiFi] Skipping sync - already synced today");
     wifi_connected_ = false;
-    time_synced_ = (last_sync_epoch_ > 0);
+    // Only consider time synced if we have a valid epoch and synced today
+    time_synced_ = (last_sync_epoch_ > 0 && strcmp(last_sync_date_key_, INVALID_DATE_KEY) != 0);
     
     // Configure time even if not syncing
     configTime(TIMEZONE_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
@@ -866,7 +867,7 @@ void PomodoroTimerApp::buildCurrentDateKey(char *out, size_t size)
   }
   else
   {
-    snprintf(out, size, "19700101");
+    snprintf(out, size, "%s", INVALID_DATE_KEY);
   }
 }
 
