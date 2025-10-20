@@ -1044,7 +1044,7 @@ private:
 
     uint32_t now_ms = millis();
     last_tick_ms_ = now_ms;
-    last_ui_render_ms_ = now_ms - UI_UPDATE_INTERVAL_MS; // force refresh on next loop
+    last_ui_render_ms_ = now_ms - UI_UPDATE_INTERVAL_MS; // 次のループで強制リフレッシュ
     checkpoint_next_due_ms_ = now_ms + CHECKPOINT_INTERVAL_MS;
 
     beepOk(2);
