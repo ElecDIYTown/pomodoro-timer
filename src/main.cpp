@@ -106,6 +106,7 @@ constexpr long TIMEZONE_OFFSET_SEC = 9L * 3600L; // JST (+9h)
 constexpr int DAYLIGHT_OFFSET_SEC = 0;
 
 #if PT_ENABLE_DEBUG
+// Wi-Fiの設定値をデバッグ用にシリアルへ出力する。
 static void logWifiCredentialConstants()
 {
   DBG_PRINTLN("[DBG] WiFi credential constants:");
@@ -116,6 +117,7 @@ static void logWifiCredentialConstants()
   DBG_PRINTF("[DBG] WIFI_PASSWORD_VALUE length: %u\n", static_cast<unsigned>(strlen(WIFI_PASSWORD_VALUE)));
 }
 #else
+// デバッグ無効時のダミー実装。
 static void logWifiCredentialConstants() {}
 #endif
 
@@ -196,17 +198,20 @@ class PomodoroTimerApp; // forward declaration for callbacks
 class ButtonHandler
 {
 public:
+  // ボタンラダー入力を設定しADC分解能を指定する。
   void begin()
   {
     analogReadResolution(12);
     pinMode(PIN_BUTTON_LADDER, INPUT);
   }
 
+  // 長押し通知を受け取るオブザーバを登録する。
   void setLongPressObserver(PomodoroTimerApp *observer)
   {
     long_press_observer_ = observer;
   }
 
+  // ラダー入力を読み取りボタン状態を更新する。
   void update(uint32_t now_ms)
   {
     ButtonId raw = decodeButton(analogRead(PIN_BUTTON_LADDER));
@@ -215,6 +220,7 @@ public:
     handleLongPressTick(now_ms);
   }
 
+  // キューにある次のボタンイベントを取得する。
   bool poll(ButtonEvent &evt)
   {
     if (queue_count_ == 0)
@@ -230,6 +236,7 @@ public:
 private:
   static constexpr uint8_t QUEUE_CAPACITY = 8;
 
+  // ADC値を論理ボタンIDへ変換する。
   ButtonId decodeButton(uint16_t raw)
   {
     if (raw < ADC_THRESHOLD_BTN1_BTN2)
@@ -247,6 +254,7 @@ private:
     return ButtonId::NONE;
   }
 
+  // デバウンス処理を行い状態遷移を検出する。
   void updateDebounce(ButtonId raw, uint32_t now_ms)
   {
     if (raw != pending_state_)
@@ -271,6 +279,7 @@ private:
     }
   }
 
+  // 安定状態間の遷移時に処理を行う。
   void handleStateChange(ButtonId previous, ButtonId current, uint32_t now_ms)
   {
     if (previous == ButtonId::NONE && current != ButtonId::NONE)
@@ -289,6 +298,7 @@ private:
     }
   }
 
+  // ボタン解放時の処理を行いイベントをキューへ入れる。
   void handleRelease(ButtonId button, uint32_t now_ms)
   {
     uint32_t held_ms = now_ms - press_start_ms_;
@@ -323,6 +333,7 @@ private:
     }
   }
 
+  // シングルタップとダブルタップを判定する。
   void handleTap(ButtonId button, uint32_t /*held_ms*/, uint32_t now_ms)
   {
     PendingSingle &slot = (button == ButtonId::BTN2) ? pending_btn2_ : pending_btn3_;
@@ -340,12 +351,14 @@ private:
     }
   }
 
+  // ダブルタップ猶予が切れたらシングルタップを確定させる。
   void finalizePendingSingles(uint32_t now_ms)
   {
     finalizeSingleForButton(ButtonId::BTN2, pending_btn2_, now_ms);
     finalizeSingleForButton(ButtonId::BTN3, pending_btn3_, now_ms);
   }
 
+  // 指定ボタンの保留タップ状態を確定させる。
   void finalizeSingleForButton(ButtonId button, PendingSingle &slot, uint32_t now_ms)
   {
     if (!slot.active)
@@ -359,6 +372,7 @@ private:
     }
   }
 
+  // ボタンイベントをリングバッファへ追加し必要なら最古を破棄する。
   void enqueue(ButtonEventType type)
   {
     if (type == ButtonEventType::NONE)
@@ -401,6 +415,7 @@ private:
 class BuzzerController
 {
 public:
+  // 音声出力用PWMを初期化しブザーを停止状態にする。
   void begin()
   {
 #if defined(ESP32) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
@@ -414,13 +429,16 @@ public:
     stop();
   }
 
+  // 0〜10の範囲でブザー音量を設定する。
   void setVolumeLevel(uint8_t level)
   {
     volume_level_ = constrain(level, static_cast<uint8_t>(0), static_cast<uint8_t>(10));
   }
 
+  // 現在のブザー音量を返す。
   uint8_t volumeLevel() const { return volume_level_; }
 
+  // 指定時間のビープ音を現在の音量で鳴らす。
   void beep(uint32_t duration_ms)
   {
     if (volume_level_ == 0)
@@ -433,6 +451,7 @@ public:
     stop_at_ms_ = millis() + duration_ms;
   }
 
+  // 鳴動中のビープを監視し時間になったら停止する。
   void update()
   {
     if (active_ && (millis() >= stop_at_ms_))
@@ -441,6 +460,7 @@ public:
     }
   }
 
+  // 現在の出力を即座に停止する。
   void stop()
   {
     writeDuty(0);
@@ -448,6 +468,7 @@ public:
   }
 
 private:
+  // ESP32のコアバージョンに応じた方法でPWMデューティを設定する。
   inline void writeDuty(uint32_t duty)
   {
 #if defined(ESP32) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
@@ -540,6 +561,7 @@ struct CheckpointPayload
 class PomodoroTimerApp
 {
 public:
+  // 周辺機器やストレージを初期化しアプリ状態を整える。
   void begin()
   {
     DBG_PRINTLN("[BOOT] PomodoroTimerApp.begin()");
@@ -568,6 +590,7 @@ public:
     DBG_PRINTLN("[BOOT] begin() done");
   }
 
+  // ボタン処理・タイマー更新・UI描画を実行するメインループ。
   void loop()
   {
     uint32_t now_ms = millis();
@@ -594,22 +617,38 @@ public:
   // ---------------------------------------------------------------------------
   // Accessors for UI / status
   // ---------------------------------------------------------------------------
+  // UI描画で使用するTFTインスタンスを返す。
   Adafruit_ST7789 &display() { return tft_; }
+  // タイマーの現在状態を返す。
   TimerState state() const { return state_; }
+  // 現在のセグメント情報を参照する。
   const SegmentMetadata &segment() const { return current_segment_; }
+  // 有効なフェーズのインデックスを返す。
   uint8_t currentPhaseIndex() const { return current_phase_index_; }
+  // 現在フェーズに残っているミリ秒を返す。
   uint32_t remainingMs() const { return remaining_ms_; }
+  // 現在フェーズに設定された総時間を返す。
   uint32_t basePhaseDurationMs() const { return PHASES[current_phase_index_].duration_ms; }
+  // 現在フェーズが作業時間かどうかを返す。
   bool isWorkPhase() const { return PHASES[current_phase_index_].is_work; }
+  // 今日の累計集中時間をミリ秒で返す。
   uint32_t todayFocusMs() const { return today_focus_ms_; }
+  // UI表示用にブザー音量を返す。
   uint8_t volumeLevel() const { return buzzer_.volumeLevel(); }
+  // Wi-Fiへ接続できているかを返す。
   bool wifiConnected() const { return wifi_connected_; }
+  // NTPで時刻同期済みかどうかを返す。
   bool timeSynchronized() const { return time_synced_; }
+  // SDカードが利用可能かどうかを返す。
   bool sdAvailable() const { return sd_available_; }
+  // LittleFSがマウントされているかどうかを返す。
   bool littleFsAvailable() const { return littlefs_available_; }
+  // 現在のポモドーロサイクル名を返す。
   const char *cycleLabel() const { return current_segment_.cycle_label; }
+  // 現在日付を表すYYYYMMDDキーを返す。
   const char *dateKey() const { return current_date_key_; }
 
+  // BTN1の長押し中にフィードバック用ビープを鳴らす。
   void onButtonLongPressTick(ButtonId button, uint32_t seconds_elapsed)
   {
     if (button != ButtonId::BTN1)
@@ -624,13 +663,16 @@ public:
     buzzer_.beep(60);
   }
 
+  // 現在セグメントで経過したミリ秒を返す。
   uint32_t elapsedMsInSegment() const { return elapsed_ms_in_segment_; }
+  // 最後に成功したNTP同期のエポック秒を返す。
   time_t lastSyncEpoch() const { return last_sync_epoch_; }
 
 private:
   // ---------------------------------------------------------------------------
   // Initialization helpers
   // ---------------------------------------------------------------------------
+  // TFTディスプレイを初期化し起動時の簡易表示を行う。
   void initDisplay()
   {
     DBG_PRINTLN("[BOOT] initDisplay: ST7789 init start");
@@ -645,6 +687,7 @@ private:
     DBG_PRINTLN("[BOOT] initDisplay: OK");
   }
 
+  // LittleFSとSDカードをマウントし失敗時はビープで通知する。
   void initStorage()
   {
     DBG_PRINTLN("[BOOT] initStorage: LittleFS.begin");
@@ -678,6 +721,7 @@ private:
     }
   }
 
+  // Wi-Fi接続と時刻同期を行い結果に応じてビープを鳴らす。
   void initWiFiAndTime()
   {
     DBG_PRINTLN("[BOOT] initWiFiAndTime: WiFi begin");
@@ -779,6 +823,7 @@ private:
     }
   }
 
+  // NTPでRTCが更新されるまで最大5秒待機する。
   bool waitForTimeSync(struct tm &info)
   {
     uint32_t start = millis();
@@ -793,6 +838,7 @@ private:
     return false;
   }
 
+  // チェックポイントから状態を復元し失敗時はリセットする。
   void loadCheckpointOrReset()
   {
     if (!littlefs_available_)
@@ -844,6 +890,7 @@ private:
     restoreFromCheckpoint(payload);
   }
 
+  // 永続化された情報を現在のセッション状態へ反映する。
   void restoreFromCheckpoint(const CheckpointPayload &payload)
   {
     buzzer_.setVolumeLevel(payload.volume_level);
@@ -890,6 +937,7 @@ private:
     }
   }
 
+  // チェックポイント復旧時の情報をCSVへ追記する。
   void logRecoveredDrop(const CheckpointPayload &payload)
   {
     if (!sd_available_)
@@ -915,6 +963,7 @@ private:
                    payload.cycle_label.c_str());
   }
 
+  // Puts the application back into a factory-fresh state.
   void resetState()
   {
     state_ = TimerState::STOPPED;
@@ -937,6 +986,7 @@ private:
   // ---------------------------------------------------------------------------
   // Button handling
   // ---------------------------------------------------------------------------
+  // ボタンイベントキューを処理して各ハンドラを呼び出す。
   void processButtonEvents()
   {
     ButtonEvent evt;
@@ -974,6 +1024,7 @@ private:
     }
   }
 
+  // 動作状態と一時停止を切り替え、停止中なら新しいセッションを開始する。
   void handleStartPause()
   {
     if (state_ == TimerState::STOPPED)
@@ -993,6 +1044,7 @@ private:
     }
   }
 
+  // 必要なら現在のセグメントを確定させたうえで次フェーズへ進む。
   void handleSkip()
   {
     if (state_ == TimerState::STOPPED)
@@ -1006,6 +1058,7 @@ private:
     advancePhase(+1, true);
   }
 
+  // 中断として記録しながら前のフェーズへ戻る。
   void handlePrev()
   {
     if (state_ == TimerState::STOPPED)
@@ -1018,6 +1071,7 @@ private:
     advancePhase(-1, true);
   }
 
+  // チェックポイントを削除し状態を初期化してビープで知らせる。
   void handleFactoryReset()
   {
     DBG_PRINTLN("[BTN] Factory reset requested");
@@ -1050,6 +1104,7 @@ private:
     beepOk(2);
   }
 
+  // 残り時間を分単位で加減する。
   void adjustRemainingMinutes(int8_t delta_minutes)
   {
     int32_t new_remaining = static_cast<int32_t>(remaining_ms_) + static_cast<int32_t>(delta_minutes) * 60000L;
@@ -1065,6 +1120,7 @@ private:
     }
   }
 
+  // 許容範囲内でブザー音量を上下させる。
   void adjustVolume(int8_t delta)
   {
     int16_t level = static_cast<int16_t>(buzzer_.volumeLevel()) + delta;
@@ -1075,6 +1131,7 @@ private:
   // ---------------------------------------------------------------------------
   // Phase / segment control
   // ---------------------------------------------------------------------------
+  // 指定したフェーズのカウンタとメタデータを初期化する。
   void beginPhase(uint8_t phase_index)
   {
     current_phase_index_ = phase_index % PHASE_COUNT;
@@ -1104,6 +1161,7 @@ private:
     final_countdown_last_sec_ = 0;
   }
 
+  // 一時停止後に新しいセグメントを開始してフェーズを再開する。
   void resumeCurrentPhase()
   {
     state_ = TimerState::RUNNING;
@@ -1112,6 +1170,7 @@ private:
     elapsed_ms_in_segment_ = 0;
   }
 
+  // フェーズの位置を前後へ移動し必要なら自動的に開始する。
   void advancePhase(int direction, bool auto_start)
   {
     if (direction > 0)
@@ -1148,7 +1207,8 @@ private:
     }
   }
 
-  // Resets the timer state once the configured cycle finishes.
+  // 設定されたサイクルが完了した際にタイマー状態を初期化する。
+  // カウンタをリセットしフェーズを先頭に戻して次サイクルを待機する。
   void concludeCycleAndHold()
   {
     state_ = TimerState::STOPPED;
@@ -1167,6 +1227,7 @@ private:
     current_segment_.start_epoch = 0;
   }
 
+  // 経過時間を反映しアラートを鳴らしフェーズ終了時に遷移する。
   void updateTimer(uint32_t delta_ms)
   {
     if (state_ != TimerState::RUNNING)
@@ -1202,6 +1263,7 @@ private:
     }
   }
 
+  // 残り時間に応じてブザー通知を行う。
   void triggerAlerts()
   {
     if (remaining_ms_ <= PRE_ALERT_THRESHOLD_MS && !pre_alert_triggered_)
@@ -1225,6 +1287,7 @@ private:
     }
   }
 
+  // セグメントの集計を終了させ必要に応じてストレージへ記録する。
   void finalizeSegment(SegmentEndReason reason)
   {
     time_t end_epoch = determineSegmentEndEpoch();
@@ -1260,6 +1323,7 @@ private:
     }
   }
 
+  // Determines when the current segment should be considered to have started.
   time_t determineSegmentStartEpoch()
   {
     time_t now_epoch = time(nullptr);
@@ -1274,6 +1338,7 @@ private:
     return now_epoch;
   }
 
+  // Computes the segment end time, falling back to best-effort estimates.
   time_t determineSegmentEndEpoch()
   {
     time_t now_epoch = time(nullptr);
@@ -1291,6 +1356,7 @@ private:
     return now_epoch;
   }
 
+  // Advances the session counter while ensuring date-based resets.
   void incrementSessionId()
   {
     // Reset session counter when date changes
@@ -1299,6 +1365,7 @@ private:
     next_session_id_ += 1;
   }
 
+  // Updates the date key and resets daily counters when the day changes.
   void ensureDateKeyFresh()
   {
     char today_key[9] = {0};
@@ -1312,12 +1379,14 @@ private:
     }
   }
 
+  // Rebuilds the cached current date string.
   void updateCurrentDateKey()
   {
     buildCurrentDateKey(current_date_key_, sizeof(current_date_key_));
     current_date_key_[sizeof(current_date_key_) - 1] = '\0';
   }
 
+  // Formats the current date into YYYYMMDD form with a fallback value.
   void buildCurrentDateKey(char *out, size_t size)
   {
     struct tm info;
@@ -1331,6 +1400,7 @@ private:
     }
   }
 
+  // Handles transitions at midnight to keep daily metrics consistent.
   void maybeHandleDayCutover()
   {
     if (state_ != TimerState::RUNNING)
@@ -1398,6 +1468,7 @@ private:
     final_countdown_last_sec_ = 0;
   }
 
+  // Periodically writes checkpoint data to LittleFS for recovery.
   void maybeSaveCheckpoint(uint32_t now_ms)
   {
     if (!littlefs_available_)
@@ -1461,6 +1532,7 @@ private:
   // ----------------------------
   // Diagnostics helpers
   // ----------------------------
+  // Draws a simple two-line splash screen with the provided text.
   void splash(const char *l1, const char *l2, uint16_t color)
   {
     tft_.fillScreen(COLOR_BACKGROUND);
@@ -1473,6 +1545,7 @@ private:
     tft_.print(l2);
   }
 
+  // Renders boot status badges indicating subsystem availability.
   void drawBootBadges()
   {
     tft_.setTextSize(2);
@@ -1492,6 +1565,7 @@ private:
     tft_.print(time_synced_ ? "OK" : "NG");
   }
 
+  // Plays a short confirmation chirp a specified number of times.
   void beepOk(uint8_t count)
   {
     for (uint8_t i = 0; i < count; ++i)
@@ -1501,6 +1575,7 @@ private:
     }
   }
 
+  // Emits warning beeps at a minimum loudness to flag errors.
   void beepError(uint8_t count, uint8_t min_volume = 3)
   {
     uint8_t prev = buzzer_.volumeLevel();
@@ -1515,6 +1590,7 @@ private:
     buzzer_.setVolumeLevel(prev);
   }
 
+  // Appends an activity record to the SD card log file.
   void appendCsvEntry(uint16_t session_id,
                       uint16_t segment_id,
                       time_t start_epoch,
@@ -1555,6 +1631,7 @@ private:
     file.close();
   }
 
+  // Formats an epoch timestamp into a human-readable string.
   void formatTimestamp(time_t epoch, char *out, size_t size)
   {
     if (epoch <= 0)
@@ -1610,6 +1687,7 @@ private:
   char current_date_key_[9] = "19700101";
 };
 
+// BTN1が押下され続けている間に一定間隔でコールバックする。
 void ButtonHandler::handleLongPressTick(uint32_t now_ms)
 {
   if (active_button_ != ButtonId::BTN1)
@@ -1641,6 +1719,7 @@ void ButtonHandler::handleLongPressTick(uint32_t now_ms)
   long_press_observer_->onButtonLongPressTick(active_button_, seconds);
 }
 
+// 実行時UIを描画し前回描画内容をキャッシュする。
 static void renderUI(PomodoroTimerApp &app)
 {
   Adafruit_ST7789 &tft = app.display();
@@ -1860,6 +1939,7 @@ static void renderUI(PomodoroTimerApp &app)
   cache.cycle_label[sizeof(cache.cycle_label) - 1] = '\0';
 }
 
+// Draws a Wi-Fi status icon and label indicating connectivity.
 static void drawWifiIndicator(Adafruit_ST7789 &display, int16_t x, int16_t y, bool connected)
 {
   const int16_t width = 90;
@@ -1911,6 +1991,7 @@ static void drawWifiIndicator(Adafruit_ST7789 &display, int16_t x, int16_t y, bo
   }
 }
 
+// Paints the progress bar showing remaining time and percentage.
 static void drawProgressBar(Adafruit_ST7789 &display, float remaining_ratio)
 {
   const int16_t bar_x = 20;
@@ -1955,6 +2036,7 @@ static void drawProgressBar(Adafruit_ST7789 &display, float remaining_ratio)
   display.print(percent_buffer);
 }
 
+// Writes text centered horizontally at the specified Y position.
 static void drawCenteredText(Adafruit_ST7789 &display, const char *text, int16_t y, uint8_t size, uint16_t color)
 {
   int16_t x1, y1;
@@ -1972,6 +2054,7 @@ static void drawCenteredText(Adafruit_ST7789 &display, const char *text, int16_t
 // -----------------------------------------------------------------------------
 static PomodoroTimerApp app;
 
+// Initializes debugging, logs credentials, and boots the application.
 void setup()
 {
   DBG_BEGIN(115200);
@@ -1982,6 +2065,7 @@ void setup()
   app.begin();
 }
 
+// Delegates to the application loop and periodically prints diagnostics.
 void loop()
 {
   app.loop();
